@@ -1,5 +1,6 @@
 import {
   BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query,
+  Req,
   UseGuards
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -17,6 +18,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 
+
 class UpdateUserDto {
   @IsOptional() @IsString() @MinLength(2) fullName?: string;
   @IsOptional() @IsIn(['doctor','admin']) role?: 'doctor'|'admin';
@@ -32,10 +34,12 @@ class UpdateDeviceDto {
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
-@Controller('admin')
+
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles('admin')
+@Controller('admin')
 export class AdminController {
+  
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
     @InjectRepository(Device) private readonly devices: Repository<Device>,
@@ -84,6 +88,9 @@ export class AdminController {
     const list = await this.users.find({ where, order: { fullName: 'ASC' } });
     return list.map(u => ({ id: u.id, name: u.fullName, email: u.email, role: u.role, isActive: u.isActive }));
   }
+
+  @Get('whoami')
+  whoami(@Req() req: any) { return req.user; }
 
   @Get('devices')
   async listDevices() {

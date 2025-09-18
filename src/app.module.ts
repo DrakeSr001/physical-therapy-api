@@ -13,6 +13,9 @@ import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
 import { KioskModule } from './kiosk/kiosk.module';
 import { AttendanceModule } from './attendance/attendance.module';
+import { ReportsModule } from './reports/reports.module';
+import { AdminModule } from './admin/admin.module';
+import { RolesGuard } from './auth/roles.guard';
 
 @Module({
   imports: [
@@ -38,9 +41,12 @@ import { AttendanceModule } from './attendance/attendance.module';
     AuthModule,
     KioskModule,
     AttendanceModule,
+    ReportsModule,
+    AdminModule,
   ],
   providers: [
-    { provide: APP_GUARD, useClass: ThrottlerGuard }, // ✅ enable throttling
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
 export class AppModule { }

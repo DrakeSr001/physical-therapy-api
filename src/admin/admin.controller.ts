@@ -39,6 +39,9 @@ class UpdateDeviceDto {
 @Roles('admin')
 @Controller('admin')
 export class AdminController {
+  // Temporary endpoint to see my JWT info
+  @Get('whoami') // temp debug endpoint
+  whoami(@Req() req: any) { return req.user; }
   
   constructor(
     @InjectRepository(User) private readonly users: Repository<User>,
@@ -89,8 +92,6 @@ export class AdminController {
     return list.map(u => ({ id: u.id, name: u.fullName, email: u.email, role: u.role, isActive: u.isActive }));
   }
 
-  @Get('whoami')
-  whoami(@Req() req: any) { return req.user; }
 
   @Get('devices')
   async listDevices() {

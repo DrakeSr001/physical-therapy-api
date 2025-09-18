@@ -1,7 +1,6 @@
 import { CanActivate, ExecutionContext, Injectable } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
-
-export const ROLES_KEY = 'roles';
+import { ROLES_KEY } from './roles.constant';
 
 @Injectable()
 export class RolesGuard implements CanActivate {
@@ -16,6 +15,10 @@ export class RolesGuard implements CanActivate {
 
     const req = ctx.switchToHttp().getRequest();
     const role = String(req.user?.role ?? '').toLowerCase();
+
+    // TEMP LOG (remove after debug)
+    // console.log('RolesGuard required:', required, 'got role:', role, 'user:', req.user);
+
     return required.some(r => r.toLowerCase() === role);
   }
 }

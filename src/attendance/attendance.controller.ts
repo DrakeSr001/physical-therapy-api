@@ -11,7 +11,7 @@ import {
 import { AuthGuard } from '@nestjs/passport';
 import { plainToInstance } from 'class-transformer';
 import { validateOrReject } from 'class-validator';
-
+import { Throttle } from '@nestjs/throttler';
 import { AttendanceService } from './attendance.service';
 import { ScanDto } from './dto/scan.dto';
 import { HistoryQuery } from './dto/history.query';
@@ -25,6 +25,7 @@ export class AttendanceController {
    * Body: { code: string }
    */
   @UseGuards(AuthGuard('jwt'))
+  @Throttle({ default: { limit: 30, ttl: 60_000 } }) // 30 req/min
   @Post('scan')
   async scan(@Req() req: any, @Body() body: ScanDto) {
     const dto = plainToInstance(ScanDto, body);

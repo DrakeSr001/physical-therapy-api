@@ -43,6 +43,8 @@ export class AdminController {
     return { id: u.id, fullName: u.fullName, email: u.email, role: u.role };
   }
 
+  
+
   @Post('devices')
   async createDevice(@Body() body: CreateDeviceDto) {
     const dto = plainToInstance(CreateDeviceDto, body);

@@ -16,9 +16,11 @@ import { AttendanceModule } from './attendance/attendance.module';
 import { ReportsModule } from './reports/reports.module';
 import { AdminModule } from './admin/admin.module';
 import { RolesGuard } from './auth/roles.guard';
+import { ScheduleModule } from '@nestjs/schedule'; // ← add this import
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(), // ← enables cron/intervals
     ThrottlerModule.forRoot([
       {
         ttl: 60_000, // 60 seconds

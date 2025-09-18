@@ -1,6 +1,6 @@
 import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Between, Repository } from 'typeorm';
+import { Between, Repository, DataSource } from 'typeorm';
 import { DateTime } from 'luxon';
 
 import { AttendanceLog } from './attendance-log.entity';
@@ -13,6 +13,7 @@ export class AttendanceService {
     @InjectRepository(AttendanceLog) private readonly logs: Repository<AttendanceLog>,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly kiosk: KioskService,
+    private readonly dataSource: DataSource,
   ) {}
 
   /**
@@ -28,24 +29,69 @@ export class AttendanceService {
     const user = await this.users.findOne({ where: { id: userId, isActive: true } });
     if (!user) throw new BadRequestException('user_not_found');
 
-    // 3) Determine next action based on last log
-    const last = await this.logs.findOne({
-      where: { user: { id: user.id } },
-      order: { timestampUtc: 'DESC' },
-    });
-    const nextAction: 'IN' | 'OUT' = last?.action === 'IN' ? 'OUT' : 'IN';
+    const tz = 'Africa/Cairo';
+    const nowUtc = DateTime.utc();
+    const nowLocal = nowUtc.setZone(tz);
+    const autoClose = (process.env.AUTO_CLOSE_PREVIOUS_DAY ?? 'true') === 'true';
 
-    // 4) Write log
-    const log = this.logs.create({
-      user,
-      device,
-      action: nextAction,
-      source: 'KIOSK',
-      // timestampUtc defaults to NOW()
-    });
-    await this.logs.save(log);
+    // Transaction to avoid race conditions (double scans)
+    return await this.dataSource.transaction(async (manager) => {
+      // Lock the last log row for this user
+      const last = await manager.getRepository(AttendanceLog).createQueryBuilder('log')
+        .setLock('pessimistic_write')
+        .leftJoinAndSelect('log.device', 'device')
+        .where('log.userId = :uid', { uid: user.id })
+        .orderBy('log.timestampUtc', 'DESC')
+        .getOne();
 
-    return { action: nextAction, at: new Date().toISOString() };
+      const repo = manager.getRepository(AttendanceLog);
+
+      // Helper: create log
+      const write = async (action: 'IN' | 'OUT', src: 'KIOSK' | 'API', tsUtc: Date) => {
+        const log = repo.create({
+          user,
+          device,
+          action,
+          source: src,
+          timestampUtc: tsUtc,
+        });
+        await repo.save(log);
+        return log;
+      };
+
+      if (!last || last.action === 'OUT') {
+        // No open session -> next is IN
+        const saved = await write('IN', 'KIOSK', nowUtc.toJSDate());
+        return { action: saved.action, at: saved.timestampUtc.toISOString() };
+      }
+
+      // There is an open session (last.action === 'IN')
+      // Check if same local calendar day
+      const lastLocal = DateTime.fromJSDate(last.timestampUtc, { zone: 'utc' }).setZone(tz);
+      const sameDay = lastLocal.toISODate() === nowLocal.toISODate();
+
+      if (sameDay) {
+        // Normal close of today's session
+        const saved = await write('OUT', 'KIOSK', nowUtc.toJSDate());
+        return { action: saved.action, at: saved.timestampUtc.toISOString() };
+      }
+
+      // Day changed and last IN belongs to a previous day
+      if (autoClose) {
+        // Auto close yesterday at 23:59:59 local time
+        const closeLocal = lastLocal.endOf('day'); // 23:59:59.999
+        const closeUtc = closeLocal.toUTC().toJSDate();
+        await write('OUT', 'API', closeUtc);
+
+        // Start a new session now (IN)
+        const savedIn = await write('IN', 'KIOSK', nowUtc.toJSDate());
+        return { action: savedIn.action, at: savedIn.timestampUtc.toISOString(), autoClosed: true };
+      }
+
+      // If not auto-closing, we enforce: must OUT first, but stamp with now (even if next day)
+      const savedOut = await write('OUT', 'KIOSK', nowUtc.toJSDate());
+      return { action: savedOut.action, at: savedOut.timestampUtc.toISOString(), note: 'closed previous open session' };
+    });
   }
 
   /**
@@ -74,61 +120,69 @@ export class AttendanceService {
   }
 
   /**
-   * Month summary: for each local day, first IN and last OUT times.
-   * Times are returned formatted (e.g., "09:02:52 AM") in the desired tz.
+   * Month summary: for each local day, first IN and last OUT times, plus worked hours.
    */
   async monthSummary(userId: string, year: number, month: number, tz = 'Africa/Cairo') {
     if (!year || !month || month < 1 || month > 12) {
       throw new BadRequestException('invalid_year_or_month');
     }
 
-    // Month start/end in target tz → convert to UTC for querying
     const startLocal = DateTime.fromObject({ year, month, day: 1 }, { zone: tz }).startOf('day');
     const endLocal = startLocal.plus({ months: 1 });
-    const startUtc = startLocal.toUTC().toJSDate();
-    const endUtc = endLocal.toUTC().toJSDate();
 
-    // Pull all logs for that UTC window
     const rows = await this.logs.find({
-      where: { user: { id: userId }, timestampUtc: Between(startUtc, endUtc) },
+      where: { user: { id: userId }, timestampUtc: Between(startLocal.toUTC().toJSDate(), endLocal.toUTC().toJSDate()) },
       order: { timestampUtc: 'ASC' },
     });
 
-    const daysInMonth = startLocal.daysInMonth ?? 31;
+    const daysInMonth = startLocal.daysInMonth!;
+    type DayAgg = { firstIn?: DateTime; lastOut?: DateTime; workedMs: number };
+    const perDay: DayAgg[] = Array.from({ length: daysInMonth }, () => ({ workedMs: 0 }));
 
-    // Temp holders to compute earliest IN / latest OUT per day
-    const perDay: Array<{ firstIn?: DateTime; lastOut?: DateTime }> = Array.from(
-      { length: daysInMonth },
-      () => ({}),
-    );
-
+    // First pass: compute first IN and last OUT per day
     for (const r of rows) {
-      // Convert each UTC timestamp to local tz and map to calendar day index
       const local = DateTime.fromJSDate(r.timestampUtc, { zone: 'utc' }).setZone(tz);
-      const idx = local.day - 1; // 0-based
+      if (local.month !== month || local.year !== year) continue;
+      const idx = local.day - 1;
       if (idx < 0 || idx >= daysInMonth) continue;
 
       if (r.action === 'IN') {
-        const cur = perDay[idx].firstIn;
-        if (!cur || local < cur) perDay[idx].firstIn = local;
+        if (!perDay[idx].firstIn || local < perDay[idx].firstIn!) perDay[idx].firstIn = local;
       } else if (r.action === 'OUT') {
-        const cur = perDay[idx].lastOut;
-        if (!cur || local > cur) perDay[idx].lastOut = local;
+        if (!perDay[idx].lastOut || local > perDay[idx].lastOut!) perDay[idx].lastOut = local;
       }
     }
 
-    // Build response (formatted strings)
+    // Second pass: compute workedMs (first IN → last OUT; floor negative to 0)
+    let totalMs = 0;
+    for (let i = 0; i < daysInMonth; i++) {
+      const fin = perDay[i].firstIn;
+      const lout = perDay[i].lastOut;
+      if (fin && lout && lout > fin) {
+        const ms = lout.toMillis() - fin.toMillis();
+        perDay[i].workedMs = ms;
+        totalMs += ms;
+      } else {
+        perDay[i].workedMs = 0;
+      }
+    }
+
+    // Format helpers
+    const fmtHm = (ms: number) => {
+      const mins = Math.floor(ms / 60000);
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+    };
+
     const days = Array.from({ length: daysInMonth }, (_, i) => {
       const date = DateTime.fromObject({ year, month, day: i + 1 }, { zone: tz });
-      const firstIn = perDay[i].firstIn ? perDay[i].firstIn!.toFormat('hh:mm:ss a') : null;
-      const lastOut = perDay[i].lastOut ? perDay[i].lastOut!.toFormat('hh:mm:ss a') : null;
-      return {
-        date: date.toISODate()!, // "YYYY-MM-DD"
-        in: firstIn,
-        out: lastOut,
-      };
+      const fin = perDay[i].firstIn ? perDay[i].firstIn!.toFormat('hh:mm:ss a') : null;
+      const lout = perDay[i].lastOut ? perDay[i].lastOut!.toFormat('hh:mm:ss a') : null;
+      const hours = fmtHm(perDay[i].workedMs);
+      return { date: date.toISODate()!, in: fin, out: lout, hours };
     });
 
-    return { year, month, timezone: tz, days };
+    return { year, month, timezone: tz, totalHours: fmtHm(totalMs), days };
   }
 }

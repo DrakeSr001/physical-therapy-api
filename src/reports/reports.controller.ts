@@ -8,6 +8,7 @@ import { AuthGuard } from '@nestjs/passport';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 
+
 @Controller('reports')
 export class ReportsController {
   constructor(
@@ -88,6 +89,71 @@ export class ReportsController {
       const device = r.device?.name ?? '';
       lines.push(`${date},${time},${csvEsc(doc)},${r.action},${csvEsc(device)}`);
     }
+    return lines.join('\n');
+  }
+
+  // Admin: CSV for a specific doctor in a month
+  @UseGuards(AuthGuard('jwt'), RolesGuard)
+  @Roles('admin')
+  @Get('doctor-month.csv')
+  @Header('Content-Type', 'text/csv; charset=utf-8')
+  async doctorMonthCsv(
+    @Query('userId') userId?: string,
+    @Query('year') year?: string,
+    @Query('month') month?: string
+  ) {
+    const y = Number(year), m = Number(month);
+    if (!userId || !y || !m || m < 1 || m > 12) throw new BadRequestException('userId/year/month required');
+
+    const tz = 'Africa/Cairo';
+    const start = DateTime.fromObject({ year: y, month: m, day: 1 }, { zone: tz }).startOf('day');
+    const end = start.plus({ months: 1 });
+
+    const rows = await this.logs.find({
+      where: {
+        user: { id: userId },
+        timestampUtc: Between(start.toUTC().toJSDate(), end.toUTC().toJSDate()),
+      },
+      order: { timestampUtc: 'ASC' },
+      relations: { user: true, device: true },
+    });
+
+    const lines: string[] = [];
+    lines.push('Date,Time,Doctor,Action,Device');
+
+    // Raw rows
+    for (const r of rows) {
+      const local = DateTime.fromJSDate(r.timestampUtc, { zone: 'utc' }).setZone(tz);
+      lines.push(`${local.toFormat('MM/dd/yy')},${local.toFormat('hh:mm:ss a')},${csvEsc(r.user?.fullName ?? '')},${r.action},${csvEsc(r.device?.name ?? '')}`);
+    }
+
+    // Compute total hours from first IN / last OUT per day
+    const daysInMonth = start.daysInMonth!;
+    const firstIn: (DateTime | null)[] = Array(daysInMonth).fill(null);
+    const lastOut: (DateTime | null)[] = Array(daysInMonth).fill(null);
+    for (const r of rows) {
+      const local = DateTime.fromJSDate(r.timestampUtc, { zone: 'utc' }).setZone(tz);
+      const i = local.day - 1;
+      if (r.action === 'IN') {
+        if (!firstIn[i] || local < firstIn[i]!) firstIn[i] = local;
+      } else if (r.action === 'OUT') {
+        if (!lastOut[i] || local > lastOut[i]!) lastOut[i] = local;
+      }
+    }
+    let totalMs = 0;
+    for (let i = 0; i < daysInMonth; i++) {
+      if (firstIn[i] && lastOut[i] && lastOut[i]! > firstIn[i]!) {
+        totalMs += lastOut[i]!.toMillis() - firstIn[i]!.toMillis();
+      }
+    }
+    const fmtHm = (ms: number) => {
+      const mins = Math.floor(ms / 60000);
+      const h = Math.floor(mins / 60);
+      const m2 = mins % 60;
+      return `${String(h).padStart(2, '0')}:${String(m2).padStart(2, '0')}`;
+    };
+    lines.push(`Total Hours,,${fmtHm(totalMs)},,,`);
+
     return lines.join('\n');
   }
 }

@@ -18,6 +18,9 @@ export class KioskCode {
   @Column({ name: 'expires_at', type: 'timestamptz' })
   expiresAt: Date;
 
+  @Column({ name: 'used_at', type: 'timestamptz', nullable: true })
+  usedAt: Date | null;
+
   @Column({ name: 'is_used', type: 'boolean', default: false })
   isUsed: boolean;
 

@@ -34,10 +34,9 @@ class UpdateDeviceDto {
   @IsOptional() @IsBoolean() isActive?: boolean;
 }
 
-
+@Controller('admin')
 @UseGuards(AuthGuard('jwt'), RolesGuard)
 @Roles('admin')
-@Controller('admin')
 export class AdminController {
   // Temporary endpoint to see my JWT info
   @Get('whoami') // temp debug endpoint

@@ -15,7 +15,6 @@ import { KioskModule } from './kiosk/kiosk.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { ReportsModule } from './reports/reports.module';
 import { AdminModule } from './admin/admin.module';
-import { RolesGuard } from './auth/roles.guard';
 import { ScheduleModule } from '@nestjs/schedule'; // ← add this import
 
 @Module({
@@ -48,7 +47,6 @@ import { ScheduleModule } from '@nestjs/schedule'; // ← add this import
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },
-    { provide: APP_GUARD, useClass: RolesGuard },
   ],
 })
 export class AppModule { }

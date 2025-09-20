@@ -35,63 +35,74 @@ export class AttendanceService {
     const autoClose = (process.env.AUTO_CLOSE_PREVIOUS_DAY ?? 'true') === 'true';
 
     // Transaction to avoid race conditions (double scans)
-    return await this.dataSource.transaction(async (manager) => {
-      // Lock the last log row for this user
-      const last = await manager.getRepository(AttendanceLog).createQueryBuilder('log')
-        .setLock('pessimistic_write')
-        .leftJoinAndSelect('log.device', 'device')
-        .where('log.userId = :uid', { uid: user.id })
-        .orderBy('log.timestampUtc', 'DESC')
-        .getOne();
+    try {
+      return await this.dataSource.transaction(async (manager) => {
+        // Lock the last log row for this user
+        const last = await manager
+          .getRepository(AttendanceLog)
+          .createQueryBuilder('log')
+          .setLock('pessimistic_write')
+          .leftJoinAndSelect('log.device', 'device')
+          .where('log.userId = :uid', { uid: user.id })
+          .orderBy('log.timestampUtc', 'DESC')
+          .getOne();
 
-      const repo = manager.getRepository(AttendanceLog);
+        const repo = manager.getRepository(AttendanceLog);
 
-      // Helper: create log
-      const write = async (action: 'IN' | 'OUT', src: 'KIOSK' | 'API', tsUtc: Date) => {
-        const log = repo.create({
-          user,
-          device,
-          action,
-          source: src,
-          timestampUtc: tsUtc,
-        });
-        await repo.save(log);
-        return log;
-      };
+        // Helper: create log row
+        const write = async (action: 'IN' | 'OUT', src: 'KIOSK' | 'API', tsUtc: Date) => {
+          const log = repo.create({
+            user,
+            device,
+            action,
+            source: src,
+            timestampUtc: tsUtc,
+          });
+          await repo.save(log);
+          return log;
+        };
 
-      if (!last || last.action === 'OUT') {
-        // No open session -> next is IN
-        const saved = await write('IN', 'KIOSK', nowUtc.toJSDate());
-        return { action: saved.action, at: saved.timestampUtc.toISOString() };
-      }
+        if (!last || last.action === 'OUT') {
+          // No open session -> next is IN
+          const saved = await write('IN', 'KIOSK', nowUtc.toJSDate());
+          return { action: saved.action, at: saved.timestampUtc.toISOString() };
+        }
 
-      // There is an open session (last.action === 'IN')
-      // Check if same local calendar day
-      const lastLocal = DateTime.fromJSDate(last.timestampUtc, { zone: 'utc' }).setZone(tz);
-      const sameDay = lastLocal.toISODate() === nowLocal.toISODate();
+        // There is an open session (last.action === 'IN')
+        // Check if same local calendar day
+        const lastLocal = DateTime.fromJSDate(last.timestampUtc, { zone: 'utc' }).setZone(tz);
+        const sameDay = lastLocal.toISODate() === nowLocal.toISODate();
 
-      if (sameDay) {
-        // Normal close of today's session
-        const saved = await write('OUT', 'KIOSK', nowUtc.toJSDate());
-        return { action: saved.action, at: saved.timestampUtc.toISOString() };
-      }
+        if (sameDay) {
+          // Normal close of today's session
+          const saved = await write('OUT', 'KIOSK', nowUtc.toJSDate());
+          return { action: saved.action, at: saved.timestampUtc.toISOString() };
+        }
 
-      // Day changed and last IN belongs to a previous day
-      if (autoClose) {
-        // Auto close yesterday at 23:59:59 local time
-        const closeLocal = lastLocal.endOf('day'); // 23:59:59.999
-        const closeUtc = closeLocal.toUTC().toJSDate();
-        await write('OUT', 'API', closeUtc);
+        // Day changed and last IN belongs to a previous day
+        if (autoClose) {
+          // Auto close yesterday at 23:59:59 local time
+          const closeLocal = lastLocal.endOf('day'); // 23:59:59.999
+          const closeUtc = closeLocal.toUTC().toJSDate();
+          await write('OUT', 'API', closeUtc);
 
-        // Start a new session now (IN)
-        const savedIn = await write('IN', 'KIOSK', nowUtc.toJSDate());
-        return { action: savedIn.action, at: savedIn.timestampUtc.toISOString(), autoClosed: true };
-      }
+          // Start a new session now (IN)
+          const savedIn = await write('IN', 'KIOSK', nowUtc.toJSDate());
+          return { action: savedIn.action, at: savedIn.timestampUtc.toISOString(), autoClosed: true };
+        }
 
-      // If not auto-closing, we enforce: must OUT first, but stamp with now (even if next day)
-      const savedOut = await write('OUT', 'KIOSK', nowUtc.toJSDate());
-      return { action: savedOut.action, at: savedOut.timestampUtc.toISOString(), note: 'closed previous open session' };
-    });
+        // If not auto-closing, we enforce: must OUT first, but stamp with now (even if next day)
+        const savedOut = await write('OUT', 'KIOSK', nowUtc.toJSDate());
+        return {
+          action: savedOut.action,
+          at: savedOut.timestampUtc.toISOString(),
+          note: 'closed previous open session',
+        };
+      });
+    } catch (err) {
+      console.error('attendance.scan error', err);
+      throw err;
+    }
   }
 
   /**
@@ -153,7 +164,7 @@ export class AttendanceService {
       }
     }
 
-    // Second pass: compute workedMs (first IN → last OUT; floor negative to 0)
+    // Second pass: compute workedMs (first IN + last OUT; floor negative to 0)
     let totalMs = 0;
     for (let i = 0; i < daysInMonth; i++) {
       const fin = perDay[i].firstIn;

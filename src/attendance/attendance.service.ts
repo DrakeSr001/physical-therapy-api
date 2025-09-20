@@ -46,6 +46,10 @@ export class AttendanceService {
           .orderBy('log.timestampUtc', 'DESC')
           .getOne();
 
+        const lastLocal = last
+          ? DateTime.fromJSDate(last.timestampUtc, { zone: 'utc' }).setZone(tz)
+          : null;
+
         const repo = manager.getRepository(AttendanceLog);
 
         // Helper: create log row
@@ -61,16 +65,22 @@ export class AttendanceService {
           return log;
         };
 
-        if (!last || last.action === 'OUT') {
-          // No open session -> next is IN
+        if (!last) {
+          // First scan ever -> start the day
+          const saved = await write('IN', 'KIOSK', nowUtc.toJSDate());
+          return { action: saved.action, at: saved.timestampUtc.toISOString() };
+        }
+
+        if (last.action === 'OUT') {
+          if (lastLocal && lastLocal.toISODate() === nowLocal.toISODate()) {
+            throw new BadRequestException('daily_limit_reached');
+          }
           const saved = await write('IN', 'KIOSK', nowUtc.toJSDate());
           return { action: saved.action, at: saved.timestampUtc.toISOString() };
         }
 
         // There is an open session (last.action === 'IN')
-        // Check if same local calendar day
-        const lastLocal = DateTime.fromJSDate(last.timestampUtc, { zone: 'utc' }).setZone(tz);
-        const sameDay = lastLocal.toISODate() === nowLocal.toISODate();
+        const sameDay = lastLocal!.toISODate() === nowLocal.toISODate();
 
         if (sameDay) {
           // Normal close of today's session
@@ -81,7 +91,7 @@ export class AttendanceService {
         // Day changed and last IN belongs to a previous day
         if (autoClose) {
           // Auto close yesterday at 23:59:59 local time
-          const closeLocal = lastLocal.endOf('day'); // 23:59:59.999
+          const closeLocal = lastLocal!.endOf('day'); // 23:59:59.999
           const closeUtc = closeLocal.toUTC().toJSDate();
           await write('OUT', 'API', closeUtc);
 
@@ -196,4 +206,3 @@ export class AttendanceService {
     return { year, month, timezone: tz, totalHours: fmtHm(totalMs), days };
   }
 }
-

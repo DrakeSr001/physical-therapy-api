@@ -42,7 +42,6 @@ export class AttendanceService {
           .getRepository(AttendanceLog)
           .createQueryBuilder('log')
           .setLock('pessimistic_write')
-          .leftJoinAndSelect('log.device', 'device')
           .where('log.userId = :uid', { uid: user.id })
           .orderBy('log.timestampUtc', 'DESC')
           .getOne();
@@ -197,3 +196,4 @@ export class AttendanceService {
     return { year, month, timezone: tz, totalHours: fmtHm(totalMs), days };
   }
 }
+

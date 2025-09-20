@@ -4,14 +4,21 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Dev: allow all
-  // app.enableCors();
+  const allowedOrigins = [
+    'https://physical-therapy-qr-code.netlify.app',
+  ];
 
-  // Prod: restrict to your web origin(s)
   app.enableCors({
-    origin: [
-      'https://physical-therapy-qr-code.netlify.app', // e.g. https://pt-center.netlify.app
-    ],
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+      if (origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
+        return callback(null, true);
+      }
+      if (allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error('Not allowed by CORS'));
+    },
     credentials: false,
     methods: ['GET', 'HEAD', 'PUT', 'PATCH', 'POST', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'x-device-key'],

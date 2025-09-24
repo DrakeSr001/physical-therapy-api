@@ -93,7 +93,15 @@ export class AdminController {
   async listUsers(@Query('role') role?: 'doctor'|'admin') {
     const where = role ? { role } : {};
     const list = await this.users.find({ where, order: { fullName: 'ASC' } });
-    return list.map(u => ({ id: u.id, name: u.fullName, email: u.email, role: u.role, isActive: u.isActive }));
+    return list.map((u) => ({
+      id: u.id,
+      name: u.fullName,
+      email: u.email,
+      role: u.role,
+      isActive: u.isActive,
+      hasDevice: !!u.deviceIdentifierHash,
+      deviceBoundAt: u.deviceBoundAt ? u.deviceBoundAt.toISOString() : null,
+    }));
   }
 
 

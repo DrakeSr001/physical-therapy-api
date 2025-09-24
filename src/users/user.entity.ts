@@ -24,6 +24,12 @@ export class User {
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ name: 'device_identifier_hash', type: 'varchar', length: 128, nullable: true })
+  deviceIdentifierHash?: string | null;
+
+  @Column({ name: 'device_bound_at', type: 'timestamptz', nullable: true })
+  deviceBoundAt?: Date | null;
+
   @OneToMany(() => AttendanceLog, (log) => log.user)
   attendanceLogs: AttendanceLog[];
 

@@ -10,4 +10,8 @@ export class UsersService {
   findByEmail(email: string) {
     return this.repo.findOne({ where: { email } });
   }
+
+  save(user: User) {
+    return this.repo.save(user);
+  }
 }

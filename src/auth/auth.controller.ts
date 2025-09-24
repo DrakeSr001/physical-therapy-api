@@ -13,6 +13,6 @@ export class AuthController {
     // Manual validation to keep it minimal (no global pipes required)
     const dto = plainToInstance(LoginDto, body);
     await validateOrReject(dto);
-    return this.auth.login(dto.email, dto.password);
+    return this.auth.login(dto.email, dto.password, dto.deviceId);
   }
 }

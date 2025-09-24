@@ -7,8 +7,9 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { plainToInstance } from 'class-transformer';
-import { validateOrReject, IsEmail, IsIn, IsOptional, IsString, MinLength, IsBoolean } from 'class-validator';
+import { validateOrReject, IsEmail, IsIn, IsOptional, IsString, MinLength, MaxLength, IsBoolean } from 'class-validator';
 import { randomBytes } from 'crypto';
+import { hashDeviceIdentifier } from '../auth/device-id.util';
 
 import { User } from '../users/user.entity';
 import { Device } from '../devices/device.entity';
@@ -26,6 +27,10 @@ class UpdateUserDto {
 }
 class ResetPasswordDto {
   @IsString() @MinLength(6) password!: string;
+}
+
+class SetUserDeviceDto {
+  @IsString() @MinLength(3) @MaxLength(128) deviceId!: string;
 }
 
 class UpdateDeviceDto {
@@ -108,6 +113,28 @@ export class AdminController {
     if (dto.fullName !== undefined) u.fullName = dto.fullName;
     if (dto.role !== undefined) u.role = dto.role;
     if (dto.isActive !== undefined) u.isActive = dto.isActive;
+    await this.users.save(u);
+    return { ok: true };
+  }
+
+  @Patch('users/:id/device')
+  async setUserDevice(@Param('id') id: string, @Body() body: SetUserDeviceDto) {
+    const dto = plainToInstance(SetUserDeviceDto, body);
+    await validateOrReject(dto);
+    const u = await this.users.findOne({ where: { id } });
+    if (!u) throw new BadRequestException('user_not_found');
+    u.deviceIdentifierHash = hashDeviceIdentifier(dto.deviceId);
+    u.deviceBoundAt = new Date();
+    await this.users.save(u);
+    return { ok: true };
+  }
+
+  @Delete('users/:id/device')
+  async clearUserDevice(@Param('id') id: string) {
+    const u = await this.users.findOne({ where: { id } });
+    if (!u) throw new BadRequestException('user_not_found');
+    u.deviceIdentifierHash = null;
+    u.deviceBoundAt = null;
     await this.users.save(u);
     return { ok: true };
   }

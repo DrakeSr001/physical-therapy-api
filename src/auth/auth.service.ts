@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+﻿import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { UsersService } from '../users/users.service';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
@@ -15,11 +15,17 @@ export class AuthService {
     const ok = await bcrypt.compare(password, user.passwordHash);
     if (!ok) throw new UnauthorizedException('Invalid credentials');
 
-    if (!deviceId?.trim()) throw new UnauthorizedException('device_required');
-    if (!user.deviceIdentifierHash) throw new UnauthorizedException('device_not_registered');
+    const normalizedDeviceId = deviceId?.trim();
+    if (!normalizedDeviceId) throw new UnauthorizedException('device_required');
 
-    const deviceHash = hashDeviceIdentifier(deviceId);
-    if (user.deviceIdentifierHash !== deviceHash) throw new UnauthorizedException('device_not_registered');
+    const incomingHash = hashDeviceIdentifier(normalizedDeviceId);
+    if (!user.deviceIdentifierHash) {
+      user.deviceIdentifierHash = incomingHash;
+      user.deviceBoundAt = new Date();
+      await this.users.save(user);
+    } else if (user.deviceIdentifierHash !== incomingHash) {
+      throw new UnauthorizedException('device_not_registered');
+    }
 
     const payload = { sub: user.id, name: user.fullName, role: user.role };
     const accessToken = await this.jwt.signAsync(payload);

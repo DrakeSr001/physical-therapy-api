@@ -1,4 +1,5 @@
 import { Column, CreateDateColumn, Entity, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn, Index } from 'typeorm';
+import { RefreshToken } from '../auth/refresh-token.entity';
 import { AttendanceLog } from '../attendance/attendance-log.entity';
 
 export type UserRole = 'doctor' | 'admin';
@@ -32,6 +33,9 @@ export class User {
 
   @OneToMany(() => AttendanceLog, (log) => log.user)
   attendanceLogs: AttendanceLog[];
+
+  @OneToMany(() => RefreshToken, (token) => token.user)
+  refreshTokens: RefreshToken[];
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt: Date;

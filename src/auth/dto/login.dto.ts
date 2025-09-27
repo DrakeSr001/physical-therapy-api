@@ -1,4 +1,4 @@
-import { IsEmail, IsString, MinLength, MaxLength } from 'class-validator';
+import { IsEmail, IsString, MinLength, MaxLength, IsBoolean, IsOptional } from 'class-validator';
 
 export class LoginDto {
   @IsEmail()
@@ -12,4 +12,8 @@ export class LoginDto {
   @MinLength(3)
   @MaxLength(128)
   deviceId: string;
+
+  @IsOptional()
+  @IsBoolean()
+  rememberMe?: boolean;
 }

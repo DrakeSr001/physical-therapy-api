@@ -8,6 +8,7 @@ import { ThrottlerGuard } from '@nestjs/throttler';
 import { User } from './users/user.entity';
 import { Device } from './devices/device.entity';
 import { AttendanceLog } from './attendance/attendance-log.entity';
+import { RefreshToken } from './auth/refresh-token.entity';
 import { KioskCode } from './kiosk/kiosk-code.entity';
 import { UsersModule } from './users/users.module';
 import { AuthModule } from './auth/auth.module';
@@ -32,7 +33,7 @@ import { ScheduleModule } from '@nestjs/schedule'; // ← add this import
       useFactory: (cfg: ConfigService) => ({
         type: 'postgres',
         url: cfg.get<string>('NEON_DATABASE_URL'),
-        entities: [User, Device, AttendanceLog, KioskCode],
+        entities: [User, Device, AttendanceLog, KioskCode, RefreshToken],
         synchronize: true, // DEV ONLY
         ssl: { rejectUnauthorized: false },
       }),

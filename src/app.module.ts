@@ -16,11 +16,11 @@ import { KioskModule } from './kiosk/kiosk.module';
 import { AttendanceModule } from './attendance/attendance.module';
 import { ReportsModule } from './reports/reports.module';
 import { AdminModule } from './admin/admin.module';
-import { ScheduleModule } from '@nestjs/schedule'; // ← add this import
+import { ScheduleModule } from '@nestjs/schedule';
 
 @Module({
   imports: [
-    ScheduleModule.forRoot(), // ← enables cron/intervals
+    ScheduleModule.forRoot(),
     ThrottlerModule.forRoot([
       {
         ttl: 60_000, // 60 seconds
@@ -50,4 +50,4 @@ import { ScheduleModule } from '@nestjs/schedule'; // ← add this import
     { provide: APP_GUARD, useClass: ThrottlerGuard },
   ],
 })
-export class AppModule { }
+export class AppModule {}

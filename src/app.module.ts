@@ -17,6 +17,7 @@ import { AttendanceModule } from './attendance/attendance.module';
 import { ReportsModule } from './reports/reports.module';
 import { AdminModule } from './admin/admin.module';
 import { ScheduleModule } from '@nestjs/schedule';
+import { AppUpdateModule } from './app-update/app-update.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { ScheduleModule } from '@nestjs/schedule';
     AttendanceModule,
     ReportsModule,
     AdminModule,
+    AppUpdateModule,
   ],
   providers: [
     { provide: APP_GUARD, useClass: ThrottlerGuard },

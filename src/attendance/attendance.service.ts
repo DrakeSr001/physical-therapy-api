@@ -33,6 +33,7 @@ export class AttendanceService {
     const nowUtc = DateTime.utc();
     const nowLocal = nowUtc.setZone(tz);
     const autoClose = (process.env.AUTO_CLOSE_PREVIOUS_DAY ?? 'true') === 'true';
+    const minSessionMinutes = Number(process.env.MIN_SESSION_MINUTES ?? '10');
 
     // Transaction to avoid race conditions (double scans)
     try {
@@ -83,6 +84,10 @@ export class AttendanceService {
         const sameDay = lastLocal!.toISODate() === nowLocal.toISODate();
 
         if (sameDay) {
+          const elapsedMinutes = nowLocal.diff(lastLocal!, 'minutes').minutes;
+          if (elapsedMinutes < minSessionMinutes) {
+            throw new BadRequestException('min_session_time');
+          }
           // Normal close of today's session
           const saved = await write('OUT', 'KIOSK', nowUtc.toJSDate());
           return { action: saved.action, at: saved.timestampUtc.toISOString() };

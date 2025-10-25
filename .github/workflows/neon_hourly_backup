@@ -1,0 +1,30 @@
+name: Neon Hourly Backup
+
+on:
+  schedule:
+    - cron: "0 * * * *"   # every hour UTC
+  workflow_dispatch:
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+
+      - name: Create backup
+        env:
+          NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
+        run: |
+          mkdir -p backups
+          TS=$(date -u +"%Y%m%dT%H%M%SZ")
+          pg_dump "$NEON_DATABASE_URL" --no-owner --no-privileges \
+            -f "backups/neon_dump_$TS.sql"
+          gzip "backups/neon_dump_$TS.sql"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: neon-hourly-backup
+          path: backups/*.gz
+          retention-days: 30

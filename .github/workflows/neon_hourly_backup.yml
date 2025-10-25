@@ -15,10 +15,11 @@ jobs:
           wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /etc/apt/trusted.gpg.d/postgresql.asc >/dev/null
           sudo apt-get update
           sudo apt-get install -y postgresql-client-17 gzip
-          pg_dump --version
-          psql --version
+          # sanity check: show both versions
+          /usr/lib/postgresql/17/bin/pg_dump --version
+          /usr/lib/postgresql/17/bin/psql  --version
 
-      - name: Create and compress backup
+      - name: Create and compress backup (force pg_dump 17)
         env:
           NEON_DATABASE_URL: ${{ secrets.NEON_DATABASE_URL }}
         run: |
@@ -26,9 +27,9 @@ jobs:
           TS=$(date -u +"%Y%m%dT%H%M%SZ")
           FILE="neon_dump_$TS.sql"
           echo "Creating backup $FILE"
-          # If your URL has channel_binding and psql 17 complains, you can drop it by uncommenting the next line:
-          # NEON_DATABASE_URL="${NEON_DATABASE_URL/&channel_binding=require/}"
-          pg_dump "$NEON_DATABASE_URL" --no-owner --no-privileges -f "backups/$FILE"
+          # If channel_binding trips the client, strip it:
+          URL="${NEON_DATABASE_URL/&channel_binding=require/}"
+          /usr/lib/postgresql/17/bin/pg_dump "$URL" --no-owner --no-privileges -f "backups/$FILE"
           gzip "backups/$FILE"
 
       - name: Upload backup artifact

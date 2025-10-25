@@ -2,17 +2,21 @@ name: Neon Auto Backup (Every 10 Minutes)
 
 on:
   schedule:
-    - cron: "*/10 * * * *"   # every 10 minutes (UTC)
-  workflow_dispatch:          # manual run
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
 
 jobs:
   backup:
     runs-on: ubuntu-latest
     steps:
-      - name: Install PostgreSQL client
+      - name: Install PostgreSQL 17 client (PGDG)
         run: |
+          sudo bash -lc 'echo "deb [arch=amd64,arm64] http://apt.postgresql.org/pub/repos/apt/ $(. /etc/os-release && echo $VERSION_CODENAME)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          wget -qO- https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo tee /etc/apt/trusted.gpg.d/postgresql.asc >/dev/null
           sudo apt-get update
-          sudo apt-get install -y postgresql-client gzip
+          sudo apt-get install -y postgresql-client-17 gzip
+          pg_dump --version
+          psql --version
 
       - name: Create and compress backup
         env:
@@ -22,6 +26,8 @@ jobs:
           TS=$(date -u +"%Y%m%dT%H%M%SZ")
           FILE="neon_dump_$TS.sql"
           echo "Creating backup $FILE"
+          # If your URL has channel_binding and psql 17 complains, you can drop it by uncommenting the next line:
+          # NEON_DATABASE_URL="${NEON_DATABASE_URL/&channel_binding=require/}"
           pg_dump "$NEON_DATABASE_URL" --no-owner --no-privileges -f "backups/$FILE"
           gzip "backups/$FILE"
 

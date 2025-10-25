@@ -3,7 +3,7 @@ name: Neon Auto Backup (Every 10 Minutes)
 on:
   schedule:
     - cron: "*/10 * * * *"   # every 10 minutes (UTC)
-  workflow_dispatch:          # allow manual run anytime
+  workflow_dispatch:          # manual run
 
 jobs:
   backup:

@@ -16,7 +16,7 @@ import { User } from '../users/user.entity';
 import { AuthGuard } from '@nestjs/passport';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
-import { Response } from 'express';
+import type { Response } from 'express';
 import * as ExcelJS from 'exceljs';
 
 const CLINIC_TZ = 'Africa/Cairo';
@@ -488,7 +488,8 @@ export class ReportsController {
   }
 
   private formatMinutes(totalMinutes: number) {
-    const safeMinutes = Math.max(0, minutes);
+    const minutesValue = Number.isFinite(totalMinutes) ? Math.floor(totalMinutes) : 0;
+    const safeMinutes = Math.max(0, minutesValue);
     const h = Math.floor(safeMinutes / 60);
     const m = safeMinutes % 60;
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;

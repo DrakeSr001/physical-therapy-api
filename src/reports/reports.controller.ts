@@ -162,7 +162,7 @@ export class ReportsController {
       }
     }
 
-    return lines.join('\n');
+    return `\uFEFF${lines.join('\n')}`;
   }
 
   // Admin: CSV for a specific doctor in a month
@@ -408,7 +408,7 @@ export class ReportsController {
       }
     }
 
-    return lines.join('\n');
+    return `\uFEFF${lines.join('\n')}`;
   }
 
   private ensureRange(startRaw?: string, endRaw?: string) {

@@ -17,7 +17,6 @@ import { AuthGuard } from '@nestjs/passport';
 import { Roles } from '../auth/roles.decorator';
 import { RolesGuard } from '../auth/roles.guard';
 import type { Response } from 'express';
-import * as ExcelJS from 'exceljs';
 
 const CLINIC_TZ = 'Africa/Cairo';
 const MAX_RANGE_DAYS = 120;
@@ -95,20 +94,75 @@ export class ReportsController {
       relations: { user: true, device: true },
     });
 
-    const workbook = await this.buildClinicWorkbook(rows, start, end);
-    const buffer = await this.workbookToBuffer(workbook);
     if (res) {
       const mm = m.toString().padStart(2, '0');
-      res.setHeader(
-        'Content-Type',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      );
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename="clinic-${y}-${mm}.xlsx"`,
-      );
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="clinic-${y}-${mm}.csv"`);
     }
-    return buffer;
+
+    const grouped = new Map<string, AttendanceLog[]>();
+    for (const entry of rows) {
+      const doctor = (entry.user?.fullName ?? 'Unknown Doctor').trim();
+      if (!grouped.has(doctor)) grouped.set(doctor, []);
+      grouped.get(doctor)!.push(entry);
+    }
+
+    const summaryRows: Array<{ doctor: string; totalMinutes: number; workedDays: number }> = [];
+    const lines: string[] = [];
+    const monthLabel = `${y}-${String(m).padStart(2, '0')}`;
+    lines.push('Clinic Attendance (Monthly)');
+    lines.push(`Month,${monthLabel}`);
+    lines.push('');
+
+    const sortedDoctors = Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b));
+    for (const doctor of sortedDoctors) {
+      const logs = grouped.get(doctor)!;
+      logs.sort((a, b) => a.timestampUtc.getTime() - b.timestampUtc.getTime());
+
+      lines.push(`Doctor,${csvEsc(doctor)}`);
+      lines.push('Date,Time,Action,Device');
+      for (const log of logs) {
+        const local = DateTime.fromJSDate(log.timestampUtc, { zone: 'utc' }).setZone(CLINIC_TZ);
+        lines.push(
+          `${local.toFormat('yyyy-MM-dd')},${local.toFormat('hh:mm:ss a')},${log.action},${csvEsc(log.device?.name ?? '')}`,
+        );
+      }
+
+      const daySummary = this.buildDoctorDaySummary(logs, start, end);
+      const totalMinutes = daySummary.reduce((sum, d) => sum + d.workedMinutes, 0);
+      const workedDays = daySummary.filter((d) => d.workedMinutes > 0).length;
+      summaryRows.push({ doctor, totalMinutes, workedDays });
+
+      lines.push('');
+      lines.push('Daily Summary,,,');
+      lines.push('Date,First IN,Last OUT,Hours');
+      for (const day of daySummary) {
+        const label = day.date.toFormat('yyyy-MM-dd');
+        const firstIn = day.firstIn ? day.firstIn.toFormat('hh:mm:ss a') : '';
+        const lastOut = day.lastOut ? day.lastOut.toFormat('hh:mm:ss a') : '';
+        const hours = day.workedMinutes > 0 ? this.formatMinutes(day.workedMinutes) : '';
+        lines.push(`${label},${firstIn},${lastOut},${hours}`);
+      }
+      lines.push(`Totals,,${this.formatMinutes(totalMinutes)},Worked days ${workedDays}`);
+      lines.push('');
+    }
+
+    if (summaryRows.length) {
+      lines.push('Overall Summary,,');
+      lines.push('Doctor,Worked days,Total hours,Average / worked day');
+      const sortedSummary = summaryRows.sort((a, b) => a.doctor.localeCompare(b.doctor));
+      for (const row of sortedSummary) {
+        const avg =
+          row.workedDays > 0
+            ? this.formatMinutes(Math.floor(row.totalMinutes / row.workedDays))
+            : '-';
+        lines.push(
+          `${csvEsc(row.doctor)},${row.workedDays},${this.formatMinutes(row.totalMinutes)},${avg}`,
+        );
+      }
+    }
+
+    return lines.join('\n');
   }
 
   // Admin: CSV for a specific doctor in a month
@@ -286,131 +340,75 @@ export class ReportsController {
       relations: { user: true, device: true },
     });
 
-    const workbook = await this.buildClinicWorkbook(rows, range.start, range.end);
-    const buffer = await this.workbookToBuffer(workbook);
     if (res) {
-      const filename = `clinic-${range.start.toFormat('yyyyMMdd')}-${range.end.toFormat('yyyyMMdd')}.xlsx`;
-      res.setHeader(
-        'Content-Type',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      );
+      const filename = `clinic-${range.start.toFormat('yyyyMMdd')}-${range.end.toFormat('yyyyMMdd')}.csv`;
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
       res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
     }
-    return buffer;
-  }
-
-  private async buildClinicWorkbook(
-    rows: AttendanceLog[],
-    rangeStart: DateTime,
-    rangeEnd: DateTime,
-  ) {
-    const workbook = new ExcelJS.Workbook();
-    workbook.created = new Date();
-    workbook.modified = new Date();
-    workbook.title = 'Clinic Attendance';
 
     const grouped = new Map<string, AttendanceLog[]>();
     for (const entry of rows) {
-      const doctorName = (entry.user?.fullName ?? 'Unknown Doctor').trim();
-      if (!grouped.has(doctorName)) {
-        grouped.set(doctorName, []);
-      }
-      grouped.get(doctorName)!.push(entry);
+      const doctor = (entry.user?.fullName ?? 'Unknown Doctor').trim();
+      if (!grouped.has(doctor)) grouped.set(doctor, []);
+      grouped.get(doctor)!.push(entry);
     }
 
     const summaryRows: Array<{ doctor: string; totalMinutes: number; workedDays: number }> = [];
+    const lines: string[] = [];
+    lines.push('Clinic Attendance (Custom Range)');
+    lines.push(`Range start,${range.start.toFormat('yyyy-MM-dd')}`);
+    lines.push(`Range end,${range.end.toFormat('yyyy-MM-dd')}`);
+    lines.push('');
 
-    for (const [doctor, logs] of grouped) {
-      logs.sort(
-        (a, b) => a.timestampUtc.getTime() - b.timestampUtc.getTime(),
-      );
-      const sheetName = this.sanitiseWorksheetName(workbook, doctor);
-      const sheet = workbook.addWorksheet(sheetName);
-      sheet.columns = [
-        { header: 'Date', key: 'date', width: 14 },
-        { header: 'Time', key: 'time', width: 14 },
-        { header: 'Action', key: 'action', width: 12 },
-        { header: 'Device', key: 'device', width: 30 },
-      ];
-      sheet.views = [{ state: 'frozen', ySplit: 1 }];
+    const sortedDoctors = Array.from(grouped.keys()).sort((a, b) => a.localeCompare(b));
+    for (const doctor of sortedDoctors) {
+      const logs = grouped.get(doctor)!;
+      logs.sort((a, b) => a.timestampUtc.getTime() - b.timestampUtc.getTime());
 
+      lines.push(`Doctor,${csvEsc(doctor)}`);
+      lines.push('Date,Time,Action,Device');
       for (const log of logs) {
         const local = DateTime.fromJSDate(log.timestampUtc, { zone: 'utc' }).setZone(CLINIC_TZ);
-        sheet.addRow({
-          date: local.toFormat('yyyy-MM-dd'),
-          time: local.toFormat('hh:mm:ss a'),
-          action: log.action,
-          device: log.device?.name ?? '',
-        });
+        lines.push(
+          `${local.toFormat('yyyy-MM-dd')},${local.toFormat('hh:mm:ss a')},${log.action},${csvEsc(log.device?.name ?? '')}`,
+        );
       }
 
-      const daySummary = this.buildDoctorDaySummary(logs, rangeStart, rangeEnd);
+      const daySummary = this.buildDoctorDaySummary(logs, range.start, range.end);
       const totalMinutes = daySummary.reduce((sum, d) => sum + d.workedMinutes, 0);
       const workedDays = daySummary.filter((d) => d.workedMinutes > 0).length;
       summaryRows.push({ doctor, totalMinutes, workedDays });
 
-      sheet.addRow([]);
-      sheet.addRow(['Daily summary']);
-      sheet.addRow(['Date', 'Weekday', 'First IN', 'Last OUT', 'Hours']);
+      lines.push('');
+      lines.push('Daily Summary,,,');
+      lines.push('Date,First IN,Last OUT,Hours');
       for (const day of daySummary) {
-        sheet.addRow([
-          day.date.toFormat('yyyy-MM-dd'),
-          day.date.toFormat('ccc'),
-          day.firstIn ? day.firstIn.toFormat('hh:mm a') : '',
-          day.lastOut ? day.lastOut.toFormat('hh:mm a') : '',
-          day.workedMinutes > 0 ? this.formatMinutes(day.workedMinutes) : '',
-        ]);
+        const label = day.date.toFormat('yyyy-MM-dd');
+        const firstIn = day.firstIn ? day.firstIn.toFormat('hh:mm:ss a') : '';
+        const lastOut = day.lastOut ? day.lastOut.toFormat('hh:mm:ss a') : '';
+        const hours = day.workedMinutes > 0 ? this.formatMinutes(day.workedMinutes) : '';
+        lines.push(`${label},${firstIn},${lastOut},${hours}`);
       }
-      sheet.addRow([]);
-      sheet.addRow(['Totals', '', '', '', this.formatMinutes(totalMinutes)]);
-      sheet.addRow([
-        'Worked days',
-        '',
-        '',
-        '',
-        workedDays.toString(),
-      ]);
-      sheet.addRow([
-        'Average per worked day',
-        '',
-        '',
-        '',
-        workedDays > 0 ? this.formatMinutes(Math.floor(totalMinutes / workedDays)) : '-',
-      ]);
+      lines.push(`Totals,,${this.formatMinutes(totalMinutes)},Worked days ${workedDays}`);
+      lines.push('');
     }
 
-    const summarySheet = workbook.addWorksheet('Summary');
-    summarySheet.columns = [
-      { header: 'Doctor', key: 'doctor', width: 32 },
-      { header: 'Worked days', key: 'days', width: 16 },
-      { header: 'Total hours', key: 'hours', width: 16 },
-      { header: 'Average / day', key: 'avg', width: 16 },
-    ];
-    summarySheet.views = [{ state: 'frozen', ySplit: 1 }];
-
-    const sortedSummary = summaryRows.sort((a, b) => a.doctor.localeCompare(b.doctor));
-    for (const row of sortedSummary) {
-      summarySheet.addRow({
-        doctor: row.doctor,
-        days: row.workedDays,
-        hours: this.formatMinutes(row.totalMinutes),
-        avg:
+    if (summaryRows.length) {
+      lines.push('Overall Summary,,');
+      lines.push('Doctor,Worked days,Total hours,Average / worked day');
+      const sortedSummary = summaryRows.sort((a, b) => a.doctor.localeCompare(b.doctor));
+      for (const row of sortedSummary) {
+        const avg =
           row.workedDays > 0
             ? this.formatMinutes(Math.floor(row.totalMinutes / row.workedDays))
-            : '-',
-      });
+            : '-';
+        lines.push(
+          `${csvEsc(row.doctor)},${row.workedDays},${this.formatMinutes(row.totalMinutes)},${avg}`,
+        );
+      }
     }
 
-    summarySheet.addRow([]);
-    summarySheet.addRow(['Range start', rangeStart.toFormat('yyyy-MM-dd')]);
-    summarySheet.addRow(['Range end', rangeEnd.toFormat('yyyy-MM-dd')]);
-
-    return workbook;
-  }
-
-  private async workbookToBuffer(workbook: ExcelJS.Workbook) {
-    const raw = await workbook.xlsx.writeBuffer();
-    return Buffer.isBuffer(raw) ? raw : Buffer.from(raw as ArrayBuffer);
+    return lines.join('\n');
   }
 
   private ensureRange(startRaw?: string, endRaw?: string) {
@@ -424,24 +422,6 @@ export class ReportsController {
     const span = end.startOf('day').diff(start.startOf('day'), 'days').days;
     if (span > MAX_RANGE_DAYS) throw new BadRequestException('range_too_large');
     return { start, end };
-  }
-
-  private sanitiseWorksheetName(workbook: ExcelJS.Workbook, rawName: string) {
-    const forbidden = /[\\/?*[\]:]/g;
-    let base = rawName.replace(forbidden, ' ').trim();
-    if (!base) base = 'Doctor';
-    if (base.length > 31) {
-      base = base.substring(0, 31).trim();
-    }
-    let attempt = base;
-    let counter = 2;
-    while (workbook.getWorksheet(attempt)) {
-      const suffix = ` (${counter})`;
-      const trimmedLength = Math.min(31 - suffix.length, base.length);
-      attempt = `${base.substring(0, trimmedLength)}${suffix}`;
-      counter++;
-    }
-    return attempt;
   }
 
   private buildDoctorDaySummary(rows: AttendanceLog[], start: DateTime, end: DateTime) {

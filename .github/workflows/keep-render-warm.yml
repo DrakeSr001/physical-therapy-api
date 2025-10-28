@@ -12,7 +12,7 @@ jobs:
       - name: Hit Render health endpoint
         env:
           PING_URL: ${{ secrets.RENDER_PING_URL }}
-          DEFAULT_PING_URL: https://physical-therapy-api.onrender.com/health/db
+          DEFAULT_PING_URL: https://physical-therapy-api-cg1z.onrender.com/health/db
         run: |
           URL="${PING_URL:-$DEFAULT_PING_URL}"
           echo "Pinging $URL"

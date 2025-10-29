@@ -78,9 +78,9 @@ export class ReportsController {
   @Roles('admin')
   @Get('clinic-month.xlsx')
   async clinicMonthWorkbook(
+    @Res() res: Response,
     @Query('year') year?: string,
     @Query('month') month?: string,
-    @Res({ passthrough: true }) res?: Response,
   ) {
     const y = Number(year), m = Number(month);
     if (!y || !m || m < 1 || m > 12) throw new BadRequestException('year/month required');
@@ -89,14 +89,12 @@ export class ReportsController {
     const start = DateTime.fromObject({ year: y, month: m, day: 1 }, { zone: tz }).startOf('day');
     const end = start.plus({ months: 1 });
 
-    if (res) {
-      const mm = m.toString().padStart(2, '0');
-      res.setHeader(
-        'Content-Type',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      );
-      res.setHeader('Content-Disposition', `attachment; filename="clinic-${y}-${mm}.xlsx"`);
-    }
+    const mm = m.toString().padStart(2, '0');
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="clinic-${y}-${mm}.xlsx"`);
 
     const rows = await this.logs.find({
       where: { timestampUtc: Between(start.toUTC().toJSDate(), end.toUTC().toJSDate()) },
@@ -105,7 +103,8 @@ export class ReportsController {
     });
 
     const workbook = await this.buildClinicWorkbook(rows, start, end);
-    return this.workbookToBuffer(workbook);
+    const buffer = await this.workbookToBuffer(workbook);
+    res.send(buffer);
   }
 
   // Admin: CSV for a specific doctor in a month
@@ -269,9 +268,9 @@ export class ReportsController {
   @Roles('admin')
   @Get('clinic-range.xlsx')
   async clinicRangeWorkbook(
+    @Res() res: Response,
     @Query('start') startRaw?: string,
     @Query('end') endRaw?: string,
-    @Res({ passthrough: true }) res?: Response,
   ) {
     const range = this.ensureRange(startRaw, endRaw);
 
@@ -283,17 +282,16 @@ export class ReportsController {
       relations: { user: true, device: true },
     });
 
-    if (res) {
-      const filename = `clinic-${range.start.toFormat('yyyyMMdd')}-${range.end.toFormat('yyyyMMdd')}.xlsx`;
-      res.setHeader(
-        'Content-Type',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-      );
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    }
+    const filename = `clinic-${range.start.toFormat('yyyyMMdd')}-${range.end.toFormat('yyyyMMdd')}.xlsx`;
+    res.setHeader(
+      'Content-Type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
     const workbook = await this.buildClinicWorkbook(rows, range.start, range.end);
-    return this.workbookToBuffer(workbook);
+    const buffer = await this.workbookToBuffer(workbook);
+    res.send(buffer);
   }
 
   private async buildClinicWorkbook(

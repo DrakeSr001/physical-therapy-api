@@ -79,14 +79,22 @@ export class AdminController {
     await validateOrReject(dto);
 
     const apiKey = 'dev_' + randomBytes(24).toString('base64url');
+    const offlineSecret = randomBytes(32).toString('base64url');
     const d = this.devices.create({
       name: dto.name,
       location: dto.location,
       apiKey,
       isActive: true,
+      offlineSecret,
     });
     await this.devices.save(d);
-    return { id: d.id, name: d.name, location: d.location, apiKey: d.apiKey };
+    return {
+      id: d.id,
+      name: d.name,
+      location: d.location,
+      apiKey: d.apiKey,
+      offlineSecret: d.offlineSecret,
+    };
   }
 
   @Get('users')
@@ -108,7 +116,14 @@ export class AdminController {
   @Get('devices')
   async listDevices() {
     const list = await this.devices.find({ order: { name: 'ASC' } });
-    return list.map(d => ({ id: d.id, name: d.name, location: d.location ?? '', apiKey: d.apiKey, isActive: d.isActive }));
+    return list.map((d) => ({
+      id: d.id,
+      name: d.name,
+      location: d.location ?? '',
+      apiKey: d.apiKey,
+      isActive: d.isActive,
+      hasOfflineSecret: !!d.offlineSecret,
+    }));
   }
 
   // ---- Users: update, reset password, delete ----

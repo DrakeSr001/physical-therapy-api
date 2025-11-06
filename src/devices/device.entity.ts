@@ -20,6 +20,9 @@ export class Device {
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive: boolean;
 
+  @Column({ name: 'offline_secret', type: 'varchar', length: 64, nullable: true })
+  offlineSecret?: string | null;
+
   @OneToMany(() => AttendanceLog, (log) => log.device)
   logs: AttendanceLog[];
 

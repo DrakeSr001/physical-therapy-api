@@ -1,16 +1,20 @@
 import { Controller, Get, Headers } from '@nestjs/common';
-import { KioskService } from './kiosk.service';
 import { Throttle } from '@nestjs/throttler';
-
+import { KioskService } from './kiosk.service';
 
 @Controller('kiosk')
 export class KioskController {
-  constructor(private kiosk: KioskService) {}
+  constructor(private readonly kiosk: KioskService) {}
 
-  @Throttle({ default: { limit: 20, ttl: 60_000 } }) // ✅ 20 reqs per 60 seconds
+  @Get('bootstrap')
+  async bootstrap(@Headers('x-device-key') deviceKey: string) {
+    return this.kiosk.bootstrap(deviceKey);
+  }
+
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   @Get('qr')
   async getQr(@Headers('x-device-key') deviceKey: string) {
-    // Device key identifies "Markaz Phone"
     return this.kiosk.issueCode(deviceKey);
   }
 }
+

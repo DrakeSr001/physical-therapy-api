@@ -7,9 +7,14 @@ import { User } from '../users/user.entity';
 import { Device } from '../devices/device.entity';
 import { KioskCode } from '../kiosk/kiosk-code.entity';
 import { KioskModule } from '../kiosk/kiosk.module';
+import { EventLogModule } from '../event-log/event-log.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([AttendanceLog, User, Device, KioskCode]), KioskModule],
+  imports: [
+    TypeOrmModule.forFeature([AttendanceLog, User, Device, KioskCode]),
+    KioskModule,
+    EventLogModule,
+  ],
   controllers: [AttendanceController],
   providers: [AttendanceService],
 })

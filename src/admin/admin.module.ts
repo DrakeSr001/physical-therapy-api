@@ -7,10 +7,12 @@ import { User } from '../users/user.entity';
 import { Device } from '../devices/device.entity';
 import { AttendanceLog } from '../attendance/attendance-log.entity';
 import { AdminAttendanceController } from './admin-attendance.controller';
+import { EventLogModule } from '../event-log/event-log.module';
+import { EventLogController } from './event-log.controller';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([User, Device, AttendanceLog])],
-  controllers: [AdminController, AdminAttendanceController],
+  imports: [TypeOrmModule.forFeature([User, Device, AttendanceLog]), EventLogModule],
+  controllers: [AdminController, AdminAttendanceController, EventLogController],
   providers: [RolesGuard],
 })
 export class AdminModule {}

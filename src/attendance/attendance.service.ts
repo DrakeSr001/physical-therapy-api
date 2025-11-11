@@ -6,6 +6,7 @@ import { DateTime } from 'luxon';
 import { AttendanceLog } from './attendance-log.entity';
 import { User } from '../users/user.entity';
 import { KioskService } from '../kiosk/kiosk.service';
+import { EventLogService } from '../event-log/event-log.service';
 
 @Injectable()
 export class AttendanceService {
@@ -13,6 +14,7 @@ export class AttendanceService {
     @InjectRepository(AttendanceLog) private readonly logs: Repository<AttendanceLog>,
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly kiosk: KioskService,
+    private readonly events: EventLogService,
     private readonly dataSource: DataSource,
   ) {}
 
@@ -22,7 +24,16 @@ export class AttendanceService {
   async scan(userId: string, code: string) {
     // 1) Validate the kiosk code (exists, not expired, not used), and consume it
     const res = await this.kiosk.validateAndConsume(code);
-    if (!res.ok) throw new BadRequestException(res.reason);
+    if (!res.ok) {
+      await this.events.record({
+        userId,
+        action: 'attendance.scan',
+        status: 'error',
+        message: res.reason,
+        details: { code },
+      });
+      throw new BadRequestException(res.reason);
+    }
     const device = res.device;
 
     // 2) Ensure user exists & active
@@ -37,7 +48,7 @@ export class AttendanceService {
 
     // Transaction to avoid race conditions (double scans)
     try {
-      return await this.dataSource.transaction(async (manager) => {
+      const result = await this.dataSource.transaction(async (manager) => {
         // Lock the last log row for this user
         const last = await manager
           .getRepository(AttendanceLog)
@@ -113,8 +124,21 @@ export class AttendanceService {
           note: 'closed previous open session',
         };
       });
+      await this.events.record({
+        user,
+        action: 'attendance.scan',
+        status: 'success',
+        details: { result },
+      });
+      return result;
     } catch (err) {
       console.error('attendance.scan error', err);
+      await this.events.record({
+        user,
+        action: 'attendance.scan',
+        status: 'error',
+        message: err instanceof Error ? err.message : String(err),
+      });
       throw err;
     }
   }

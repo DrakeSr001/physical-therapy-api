@@ -5,6 +5,7 @@ import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { hashDeviceIdentifier } from './device-id.util';
 import { RefreshTokenService } from './refresh-token.service';
+import { EventLogService } from '../event-log/event-log.service';
 
 @Injectable()
 export class AuthService {
@@ -12,6 +13,7 @@ export class AuthService {
     private users: UsersService,
     private jwt: JwtService,
     private refreshTokens: RefreshTokenService,
+    private events: EventLogService,
     private cfg: ConfigService,
   ) {}
 
@@ -24,13 +26,38 @@ export class AuthService {
 
   async login(email: string, password: string, deviceId: string, rememberMe: boolean) {
     const user = await this.users.findByEmail(email);
-    if (!user || !user.isActive) throw new UnauthorizedException('Invalid credentials');
+    if (!user || !user.isActive) {
+      await this.events.record({
+        user: user ?? undefined,
+        action: 'auth.login',
+        status: 'error',
+        message: 'invalid credentials',
+        details: { email },
+      });
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     const ok = await bcrypt.compare(password, user.passwordHash);
-    if (!ok) throw new UnauthorizedException('Invalid credentials');
+    if (!ok) {
+      await this.events.record({
+        user,
+        action: 'auth.login',
+        status: 'error',
+        message: 'invalid credentials',
+      });
+      throw new UnauthorizedException('Invalid credentials');
+    }
 
     const normalizedDeviceId = deviceId?.trim();
-    if (!normalizedDeviceId) throw new UnauthorizedException('device_required');
+    if (!normalizedDeviceId) {
+      await this.events.record({
+        user,
+        action: 'auth.login',
+        status: 'error',
+        message: 'device_required',
+      });
+      throw new UnauthorizedException('device_required');
+    }
 
     const incomingHash = hashDeviceIdentifier(normalizedDeviceId);
     if (user.deviceIdentifierHash !== incomingHash) {
@@ -55,13 +82,19 @@ export class AuthService {
       await this.refreshTokens.revokeForDevice(user.id, incomingHash);
     }
 
-    return {
+    const result = {
       accessToken,
       refreshToken,
       refreshTokenExpiresAt: refreshExpiresAt,
       rememberMe,
       user: { id: user.id, name: user.fullName, email: user.email, role: user.role },
     };
+    await this.events.record({
+      user,
+      action: 'auth.login',
+      status: 'success',
+    });
+    return result;
   }
 
   async refresh(refreshToken: string, deviceId: string) {
@@ -88,12 +121,18 @@ export class AuthService {
     const payload = { sub: user.id, name: user.fullName, role: user.role };
     const accessToken = await this.jwt.signAsync(payload);
 
-    return {
+    const result = {
       accessToken,
       refreshToken: rotation.token,
       refreshTokenExpiresAt: rotation.expiresAt ? rotation.expiresAt.toISOString() : null,
       rememberMe: rotation.persistent,
       user: { id: user.id, name: user.fullName, email: user.email, role: user.role },
     };
+    await this.events.record({
+      user,
+      action: 'auth.refresh',
+      status: 'success',
+    });
+    return result;
   }
 }

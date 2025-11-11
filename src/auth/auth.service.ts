@@ -33,12 +33,10 @@ export class AuthService {
     if (!normalizedDeviceId) throw new UnauthorizedException('device_required');
 
     const incomingHash = hashDeviceIdentifier(normalizedDeviceId);
-    if (!user.deviceIdentifierHash) {
+    if (user.deviceIdentifierHash !== incomingHash) {
       user.deviceIdentifierHash = incomingHash;
       user.deviceBoundAt = new Date();
       await this.users.save(user);
-    } else if (user.deviceIdentifierHash !== incomingHash) {
-      throw new UnauthorizedException('device_not_registered');
     }
 
     const payload = { sub: user.id, name: user.fullName, role: user.role };
